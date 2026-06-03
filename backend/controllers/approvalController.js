@@ -1,0 +1,110 @@
+const asyncHandler = require('express-async-handler');
+const File = require('../models/File');
+
+// Valid status transitions
+const validTransitions = {
+  Submitted: ['Under Review', 'Rejected'],
+  'Under Review': ['Approved', 'Rejected', 'Returned'],
+  Returned: ['Under Review'],
+  Approved: [],
+  Rejected: [],
+};
+
+const updateStatus = asyncHandler(async (req, res) => {
+  const { id } = req.params;
+  const { action, remarks } = req.body; // action: 'approve' | 'reject' | 'return' | 'review'
+
+  const actionStatusMap = {
+    review: 'Under Review',
+    approve: 'Approved',
+    reject: 'Rejected',
+    return: 'Returned',
+  };
+
+  const newStatus = actionStatusMap[action];
+  if (!newStatus) {
+    res.status(400);
+    throw new Error(`Invalid action "${action}". Use: review, approve, reject, return`);
+  }
+
+  // Remarks required for rejection
+  if (action === 'reject' && (!remarks || remarks.trim() === '')) {
+    res.status(400);
+    throw new Error('Remarks are mandatory when rejecting a file');
+  }
+
+  // Remarks required for return
+  if (action === 'return' && (!remarks || remarks.trim() === '')) {
+    res.status(400);
+    throw new Error('Remarks are mandatory when returning a file for changes');
+  }
+
+  const file = await File.findById(id);
+  if (!file) {
+    res.status(404);
+    throw new Error('File not found');
+  }
+
+  // Check valid transition
+  const allowed = validTransitions[file.status] || [];
+  if (!allowed.includes(newStatus)) {
+    res.status(400);
+    throw new Error(
+      `Cannot transition from "${file.status}" to "${newStatus}". Valid transitions: ${allowed.join(', ') || 'None'}`
+    );
+  }
+
+  // Update file
+  file.status = newStatus;
+  file.remarks = remarks || '';
+  file.approvalHistory.push({
+    action: action === 'review' ? 'under_review' : action === 'return' ? 'returned' : action + 'd',
+    actionBy: req.user._id,
+    actionByName: req.user.name,
+    remarks: remarks || '',
+  });
+
+  await file.save();
+  await file.populate('createdBy', 'name email department');
+
+  res.json({
+    success: true,
+    message: `File ${newStatus} successfully`,
+    data: file,
+  });
+});
+
+// @desc    Get all files pending for approval (Admin only)
+// @route   GET /api/approval/pending
+// @access  Private/Admin
+const getPendingFiles = asyncHandler(async (req, res) => {
+  const { page = 1, limit = 10, department, priority } = req.query;
+  let query = { status: { $in: ['Submitted', 'Under Review', 'Returned'] } };
+
+  if (department) query.department = department;
+  if (priority) query.priority = priority;
+
+  const skip = (Number(page) - 1) * Number(limit);
+
+  const [files, total] = await Promise.all([
+    File.find(query)
+      .populate('createdBy', 'name email department')
+      .sort({ createdAt: -1 })
+      .skip(skip)
+      .limit(Number(limit)),
+    File.countDocuments(query),
+  ]);
+
+  res.json({
+    success: true,
+    data: files,
+    pagination: {
+      total,
+      page: Number(page),
+      pages: Math.ceil(total / Number(limit)),
+      limit: Number(limit),
+    },
+  });
+});
+
+module.exports = { updateStatus, getPendingFiles };
