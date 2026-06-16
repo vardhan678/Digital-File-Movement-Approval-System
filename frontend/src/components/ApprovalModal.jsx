@@ -1,36 +1,46 @@
+/**
+ * ApprovalModal.jsx
+ *
+ * Changes from original:
+ *  ✅ Removed direct import of performAction service function
+ *  ✅ Uses usePerformActionMutation from RTK Query
+ *  ✅ Cache automatically invalidated on success (no manual refetch needed)
+ *  ✅ isLoading state comes from RTK Query mutation state
+ */
 import React, { useState } from 'react';
 import { FiX, FiCheckCircle, FiXCircle, FiRotateCcw, FiClock } from 'react-icons/fi';
 import toast from 'react-hot-toast';
-import { performAction } from '../services/approvalService';
+import { usePerformActionMutation } from '../features/approval/approvalApi';
 
 const ApprovalModal = ({ file, onClose, onSuccess }) => {
-  const [action, setAction] = useState('approve');
+  const [action, setAction]   = useState('approve');
   const [remarks, setRemarks] = useState('');
-  const [loading, setLoading] = useState(false);
+
+  // ── RTK Query mutation ────────────────────────────────
+  const [performAction, { isLoading }] = usePerformActionMutation();
 
   const actionConfig = {
     review:  { label: 'Mark Under Review',  icon: FiClock,       btnClass: 'btn-secondary', bg: 'bg-yellow-50 dark:bg-yellow-900/20' },
-    approve: { label: 'Approve File',       icon: FiCheckCircle, btnClass: 'btn-primary',   bg: 'bg-green-50 dark:bg-green-900/20' },
-    reject:  { label: 'Reject File',        icon: FiXCircle,     btnClass: 'btn-danger',    bg: 'bg-red-50 dark:bg-red-900/20' },
-    return:  { label: 'Return for Changes', icon: FiRotateCcw,   btnClass: 'btn-secondary', bg: 'bg-orange-50 dark:bg-orange-900/20' },
+    approve: { label: 'Approve File',        icon: FiCheckCircle, btnClass: 'btn-primary',   bg: 'bg-green-50 dark:bg-green-900/20' },
+    reject:  { label: 'Reject File',         icon: FiXCircle,     btnClass: 'btn-danger',    bg: 'bg-red-50 dark:bg-red-900/20' },
+    return:  { label: 'Return for Changes',  icon: FiRotateCcw,   btnClass: 'btn-secondary', bg: 'bg-orange-50 dark:bg-orange-900/20' },
   };
 
   const handleSubmit = async () => {
+    // Remarks required for reject and return actions
     if ((action === 'reject' || action === 'return') && !remarks.trim()) {
       toast.error('Remarks are required for rejection/return');
       return;
     }
-    setLoading(true);
+
     try {
-      await performAction(file._id, action, remarks);
+      await performAction({ id: file._id, action, remarks }).unwrap();
       const actionLabel = { approve: 'approved', reject: 'rejected', return: 'returned', review: 'put under review' }[action];
       toast.success(`File ${actionLabel} successfully!`);
-      onSuccess();
+      onSuccess(); // Caller can close modal / refresh
       onClose();
     } catch (err) {
-      toast.error(err.response?.data?.message || 'Action failed');
-    } finally {
-      setLoading(false);
+      toast.error(err?.data?.message || 'Action failed');
     }
   };
 
@@ -40,6 +50,7 @@ const ApprovalModal = ({ file, onClose, onSuccess }) => {
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
       <div className="absolute inset-0 bg-black/50 backdrop-blur-sm" onClick={onClose} />
       <div className="relative bg-white dark:bg-dark-card rounded-2xl shadow-2xl w-full max-w-md animate-slide-in">
+
         {/* Header */}
         <div className="flex items-center justify-between p-6 border-b border-gray-100 dark:border-dark-border">
           <h2 className="text-lg font-bold text-gray-900 dark:text-white">Approval Action</h2>
@@ -106,10 +117,10 @@ const ApprovalModal = ({ file, onClose, onSuccess }) => {
           </button>
           <button
             onClick={handleSubmit}
-            disabled={loading}
+            disabled={isLoading}
             className={`${cfg.btnClass} flex-1`}
           >
-            {loading ? 'Processing...' : cfg.label}
+            {isLoading ? 'Processing...' : cfg.label}
           </button>
         </div>
       </div>

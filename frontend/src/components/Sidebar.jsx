@@ -2,9 +2,9 @@ import React, { useState } from 'react';
 import { NavLink } from 'react-router-dom';
 import {
   FiHome, FiFileText, FiPlusCircle, FiCheckSquare,
-  FiMenu, FiX, FiFolder, FiActivity
+  FiMenu, FiX, FiFolder, FiActivity, FiUsers, FiClock
 } from 'react-icons/fi';
-import { useAuth } from '../context/AuthContext';
+import { useSelector } from 'react-redux';
 import logoImg from '../assets/logo.png';
 
 const NAV_LINKS = [
@@ -13,10 +13,11 @@ const NAV_LINKS = [
   { to: '/files/new', icon: FiPlusCircle,  label: 'New Request',    roles: ['employee'] },
   { to: '/files',     icon: FiFolder,      label: 'All Documents',  roles: ['admin'] },
   { to: '/approval',  icon: FiCheckSquare, label: 'Approval Queue', roles: ['admin'] },
+  { to: '/sessions',  icon: FiClock,       label: 'Sessions',       roles: ['admin'] },
 ];
 
 const Sidebar = () => {
-  const { user } = useAuth();
+  const user = useSelector((state) => state.auth.user);
   const [open, setOpen] = useState(false);
 
   const links = NAV_LINKS.filter((l) => l.roles.includes(user?.role));
@@ -34,14 +35,14 @@ const Sidebar = () => {
         }`
       }
     >
-      <Icon className="w-4.5 h-4.5 flex-shrink-0" />
+      <Icon className="w-4 h-4 flex-shrink-0" />
       <span>{label}</span>
     </NavLink>
   );
 
   return (
     <>
-      {/* Mobile toggle button */}
+      {/* Mobile toggle */}
       <button
         onClick={() => setOpen(true)}
         className="fixed top-3.5 left-4 z-50 md:hidden p-2.5 bg-white/90 dark:bg-dark-card/90 backdrop-blur-md shadow-lg rounded-xl border border-gray-150 dark:border-dark-border/40 focus:ring-2 focus:ring-primary-500/20 active:scale-95 transition-all"
@@ -50,7 +51,7 @@ const Sidebar = () => {
         <FiMenu className="w-5 h-5 text-gray-700 dark:text-gray-300" />
       </button>
 
-      {/* Mobile overlay */}
+      {/* Overlay */}
       {open && (
         <div
           className="fixed inset-0 bg-black/30 dark:bg-black/50 backdrop-blur-sm z-40 md:hidden animate-fade-in"
@@ -64,7 +65,7 @@ const Sidebar = () => {
           open ? 'translate-x-0' : '-translate-x-full md:translate-x-0'
         } flex flex-col shadow-xl md:shadow-none`}
       >
-        {/* Logo Section */}
+        {/* Logo */}
         <div className="h-16 flex items-center justify-between px-5 border-b border-gray-150 dark:border-dark-border/40 flex-shrink-0">
           <div className="flex items-center gap-3">
             <div className="w-9 h-9 bg-gradient-to-tr from-primary-600 to-indigo-600 rounded-xl p-0.5 shadow-md shadow-primary-500/20">
@@ -84,7 +85,7 @@ const Sidebar = () => {
           </button>
         </div>
 
-        {/* Dynamic Activity Summary Widget */}
+        {/* System Status Widget */}
         <div className="px-4 pt-5 pb-3">
           <div className="p-3.5 bg-gradient-to-tr from-gray-50 to-gray-100/50 dark:from-dark-200/40 dark:to-dark-card/20 rounded-2xl border border-gray-100 dark:border-dark-border/20 flex items-center gap-3">
             <span className="p-2 bg-emerald-500/10 dark:bg-emerald-500/20 text-emerald-600 dark:text-emerald-400 rounded-xl animate-pulse-subtle">
@@ -104,7 +105,7 @@ const Sidebar = () => {
           ))}
         </nav>
 
-        {/* Premium User Footer Card */}
+        {/* User Footer */}
         <div className="p-4 border-t border-gray-150 dark:border-dark-border/40 flex-shrink-0">
           <div className="p-3.5 rounded-2xl bg-gradient-to-tr from-primary-500/5 to-indigo-600/5 dark:from-primary-500/10 dark:to-indigo-600/10 border border-primary-500/10 dark:border-primary-500/20">
             <div className="flex justify-between items-center">
@@ -124,4 +125,3 @@ const Sidebar = () => {
 };
 
 export default Sidebar;
-

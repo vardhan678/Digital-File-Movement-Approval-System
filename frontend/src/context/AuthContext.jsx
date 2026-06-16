@@ -1,43 +1,21 @@
-import React, { createContext, useContext, useState, useEffect } from 'react';
+import React, { createContext, useContext } from 'react';
+import { useSelector } from 'react-redux';
 
 const AuthContext = createContext(null);
 
+/**
+ * AuthProvider — provides authentication state from Redux only.
+ * ❌ NO localStorage here — token is persisted by redux-persist, user is always fresh from DB.
+ * This prevents security issues where users could modify their role in dev tools.
+ */
 export const AuthProvider = ({ children }) => {
-  const [user, setUser] = useState(null);
-  const [token, setToken] = useState(null);
-  const [loading, setLoading] = useState(true);
-
-  useEffect(() => {
-    const stored = localStorage.getItem('digitalfile_auth');
-    if (stored) {
-      try {
-        const parsed = JSON.parse(stored);
-        setUser(parsed.user);
-        setToken(parsed.token);
-      } catch {
-        localStorage.removeItem('digitalfile_auth');
-      }
-    }
-    setLoading(false);
-  }, []);
-
-  const login = (userData, authToken) => {
-    setUser(userData);
-    setToken(authToken);
-    localStorage.setItem('digitalfile_auth', JSON.stringify({ user: userData, token: authToken }));
-  };
-
-  const logout = () => {
-    setUser(null);
-    setToken(null);
-    localStorage.removeItem('digitalfile_auth');
-  };
+  const { user, token, isAuthenticated } = useSelector((state) => state.auth);
 
   const isAdmin = () => user?.role === 'admin';
   const isEmployee = () => user?.role === 'employee';
 
   return (
-    <AuthContext.Provider value={{ user, token, loading, login, logout, isAdmin, isEmployee }}>
+    <AuthContext.Provider value={{ user, token, isAuthenticated, isAdmin, isEmployee }}>
       {children}
     </AuthContext.Provider>
   );

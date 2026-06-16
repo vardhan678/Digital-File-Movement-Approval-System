@@ -1,7 +1,7 @@
 import React from 'react';
 import { Link } from 'react-router-dom';
 import { FiClock, FiUser, FiArrowRight, FiTag, FiCalendar } from 'react-icons/fi';
-import StatusBadge from './StatusBadge';
+import StatusBadge from './StatusBadge';//Imports another component.
 
 const FileCard = ({ file }) => (
   <div className="card-premium p-5 flex flex-col justify-between hover:shadow-xl dark:hover:shadow-primary-950/20 group border border-gray-150 dark:border-dark-border/40 animate-fade-in bg-white dark:bg-dark-card h-[220px]">

@@ -1,5 +1,7 @@
 const asyncHandler = require('express-async-handler');
 const File = require('../models/File');
+const FileStatusHistory = require('../models/FileStatusHistory');
+const { logInfo } = require('../utils/logger');
 
 // Valid status transitions
 const validTransitions = {
@@ -10,9 +12,13 @@ const validTransitions = {
   Rejected: [],
 };
 
+// @desc    Update file status (Admin only)
+// @route   PUT /api/approval/:id
+// @access  Private/Admin
+
 const updateStatus = asyncHandler(async (req, res) => {
   const { id } = req.params;
-  const { action, remarks } = req.body; // action: 'approve' | 'reject' | 'return' | 'review'
+  const { action, remarks } = req.body;
 
   const actionStatusMap = {
     review: 'Under Review',
@@ -27,13 +33,11 @@ const updateStatus = asyncHandler(async (req, res) => {
     throw new Error(`Invalid action "${action}". Use: review, approve, reject, return`);
   }
 
-  // Remarks required for rejection
   if (action === 'reject' && (!remarks || remarks.trim() === '')) {
     res.status(400);
     throw new Error('Remarks are mandatory when rejecting a file');
   }
 
-  // Remarks required for return
   if (action === 'return' && (!remarks || remarks.trim() === '')) {
     res.status(400);
     throw new Error('Remarks are mandatory when returning a file for changes');
@@ -45,7 +49,6 @@ const updateStatus = asyncHandler(async (req, res) => {
     throw new Error('File not found');
   }
 
-  // Check valid transition
   const allowed = validTransitions[file.status] || [];
   if (!allowed.includes(newStatus)) {
     res.status(400);
@@ -54,7 +57,9 @@ const updateStatus = asyncHandler(async (req, res) => {
     );
   }
 
-  // Update file
+  const previousStatus = file.status;
+
+  // Update file inline history
   file.status = newStatus;
   file.remarks = remarks || '';
   file.approvalHistory.push({
@@ -65,16 +70,33 @@ const updateStatus = asyncHandler(async (req, res) => {
   });
 
   await file.save();
+
+  // ✅ Write to separate file_status_history collection (audit trail)
+  await FileStatusHistory.create({
+    fileId: file._id,
+    fileTitle: file.title,
+    action: newStatus,
+    previousStatus,
+    newStatus,
+    performedBy: req.user._id,
+    performedByName: req.user.name,
+    performedByRole: req.user.role,
+    remarks: remarks || '',
+    timestamp: new Date(),
+  });
+
   await file.populate('createdBy', 'name email department');
+
+  logInfo(`File "${file.title}" status changed: ${previousStatus} → ${newStatus} by ${req.user.name}`);
 
   res.json({
     success: true,
-    message: `File ${newStatus} successfully`,
+    message: `File status updated to "${newStatus}" successfully`,
     data: file,
   });
 });
 
-// @desc    Get all files pending for approval (Admin only)
+// @desc    Get all files pending for approval
 // @route   GET /api/approval/pending
 // @access  Private/Admin
 const getPendingFiles = asyncHandler(async (req, res) => {

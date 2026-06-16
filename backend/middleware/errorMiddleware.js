@@ -1,3 +1,5 @@
+const { logError } = require('../utils/logger');
+
 // 404 handler
 const notFound = (req, res, next) => {
   const error = new Error(`Not Found — ${req.originalUrl}`);
@@ -7,6 +9,9 @@ const notFound = (req, res, next) => {
 
 // Central error handler
 const errorHandler = (err, req, res, next) => {
+  // Log the error
+  logError(err, req);
+
   // Mongoose duplicate key error
   if (err.code === 11000) {
     const field = Object.keys(err.keyValue)[0];
@@ -20,7 +25,7 @@ const errorHandler = (err, req, res, next) => {
   if (err.name === 'ValidationError') {
     const messages = Object.values(err.errors).map((e) => e.message);
     return res.status(400).json({
-      success: false,
+      success: false, 
       message: messages.join(', '),
     });
   }
@@ -30,6 +35,21 @@ const errorHandler = (err, req, res, next) => {
     return res.status(400).json({
       success: false,
       message: 'Invalid ID format',
+    });
+  }
+
+  // JWT errors
+  if (err.name === 'JsonWebTokenError') {
+    return res.status(401).json({
+      success: false,
+      message: 'Invalid token — please login again',
+    });
+  }
+
+  if (err.name === 'TokenExpiredError') {
+    return res.status(401).json({
+      success: false,
+      message: 'Token expired — please login again',
     });
   }
 

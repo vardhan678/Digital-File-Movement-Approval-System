@@ -1,12 +1,20 @@
-import React, { useEffect, useState } from 'react';
+/**
+ * FileDetailPage.jsx
+ *
+ * Changes from original:
+ *  ✅ Removed manual useState/useEffect fetch
+ *  ✅ Uses useGetFileByIdQuery (RTK Query) — refetch() replaces fetchFile()
+ *  ✅ Uses useDeleteFileMutation — cache auto-invalidated after delete
+ */
+import React, { useState } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
 import {
   FiArrowLeft, FiEdit2, FiTrash2, FiDownload,
-  FiFileText, FiUser, FiClock, FiAlertTriangle, FiTag, FiPaperclip
+  FiFileText, FiUser, FiClock, FiAlertTriangle, FiTag, FiPaperclip,
 } from 'react-icons/fi';
 import toast from 'react-hot-toast';
-import { getFileById, deleteFile } from '../services/fileService';
-import { useAuth } from '../context/AuthContext';
+import { useSelector } from 'react-redux';
+import { useGetFileByIdQuery, useDeleteFileMutation } from '../features/files/fileApi';
 import LoadingSkeleton from '../components/LoadingSkeleton';
 import StatusBadge from '../components/StatusBadge';
 import ApprovalTimeline from '../components/ApprovalTimeline';
@@ -15,48 +23,40 @@ import ApprovalModal from '../components/ApprovalModal';
 const FileDetailPage = () => {
   const { id } = useParams();
   const navigate = useNavigate();
-  const { user } = useAuth();
-  const [file, setFile] = useState(null);
-  const [loading, setLoading] = useState(true);
+  const user = useSelector((state) => state.auth.user);
   const [showApproval, setShowApproval] = useState(false);
   const [showDelete, setShowDelete] = useState(false);
-  const [deleting, setDeleting] = useState(false);
 
-  const fetchFile = async () => {
-    try {
-      const res = await getFileById(id);
-      setFile(res.data);
-    } catch {
-      toast.error('Document not found');
-      navigate('/files');
-    } finally {
-      setLoading(false);
-    }
-  };
+  // ── RTK Query hooks ───────────────────────────────────
+  const { data: fileResponse, isLoading, refetch } = useGetFileByIdQuery(id, {
+    // Redirect if file not found
+    skip: !id,
+  });
+  const [deleteFile, { isLoading: deleting }] = useDeleteFileMutation();
 
-  useEffect(() => {
-    fetchFile();
-  }, [id]);
+  const file = fileResponse?.data;
 
   const handleDelete = async () => {
-    setDeleting(true);
     try {
-      await deleteFile(id);
+      await deleteFile(id).unwrap();
       toast.success('Document deleted successfully');
       navigate('/files');
     } catch (err) {
-      toast.error(err.response?.data?.message || 'Delete failed');
+      toast.error(err?.data?.message || 'Delete failed');
     } finally {
-      setDeleting(false);
       setShowDelete(false);
     }
   };
 
-  if (loading) return <LoadingSkeleton variant="detail" />;
-  if (!file) return null;
+  if (isLoading) return <LoadingSkeleton variant="detail" />;
+  if (!file) {
+    toast.error('Document not found');
+    navigate('/files');
+    return null;
+  }
 
-  const canEdit = user?.role === 'employee' && ['Submitted', 'Returned'].includes(file.status);
-  const canDelete = user?.role === 'employee' && file.createdBy?._id === user?._id;
+  const canEdit    = user?.role === 'employee' && ['Submitted', 'Returned'].includes(file.status);
+  const canDelete  = user?.role === 'employee' && file.createdBy?._id === user?._id;
   const canApprove = user?.role === 'admin';
 
   const InfoRow = ({ icon: Icon, label, value }) => (
@@ -73,7 +73,7 @@ const FileDetailPage = () => {
 
   return (
     <div className="space-y-6 animate-fade-in max-w-5xl pb-12">
-      {/* Back button & actions */}
+      {/* Back & Actions */}
       <div className="flex items-center justify-between flex-wrap gap-4">
         <button
           onClick={() => navigate(-1)}
@@ -100,18 +100,26 @@ const FileDetailPage = () => {
             </button>
           )}
           {canApprove && (
-            <button
-              onClick={() => setShowApproval(true)}
-              className="btn-primary flex items-center gap-2 text-xs uppercase tracking-wider shadow-lg shadow-primary-500/10"
-            >
-              Take Action
-            </button>
+            <>
+              <Link
+                to={`/history/file/${id}`}
+                className="btn-secondary flex items-center gap-2 text-xs uppercase tracking-wider"
+              >
+                View History
+              </Link>
+              <button
+                onClick={() => setShowApproval(true)}
+                className="btn-primary flex items-center gap-2 text-xs uppercase tracking-wider shadow-lg shadow-primary-500/10"
+              >
+                Take Action
+              </button>
+            </>
           )}
         </div>
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        {/* Main Content Pane */}
+        {/* Main Content */}
         <div className="lg:col-span-2 space-y-6">
           {/* Title Header Card */}
           <div className="card-premium border-gray-150 dark:border-dark-border/40 bg-white dark:bg-dark-card">
@@ -159,7 +167,7 @@ const FileDetailPage = () => {
             )}
           </div>
 
-          {/* Attachments Section */}
+          {/* Attachments */}
           {file.attachments?.length > 0 && (
             <div className="card-premium border-gray-150 dark:border-dark-border/40 bg-white dark:bg-dark-card">
               <div className="flex items-center gap-2 mb-4">
@@ -190,7 +198,7 @@ const FileDetailPage = () => {
             </div>
           )}
 
-          {/* Workflow Status Tracker History */}
+          {/* Approval Timeline */}
           <div className="card-premium border-gray-150 dark:border-dark-border/40 bg-white dark:bg-dark-card">
             <h3 className="font-bold text-gray-800 dark:text-gray-200 mb-6 text-sm uppercase tracking-wider">
               Approval Journey Map
@@ -203,11 +211,11 @@ const FileDetailPage = () => {
         <div className="space-y-6">
           <div className="card-premium border-gray-150 dark:border-dark-border/40 bg-white dark:bg-dark-card">
             <h3 className="font-bold text-gray-800 dark:text-gray-200 mb-4 text-sm uppercase tracking-wider">Meta Credentials</h3>
-            <InfoRow icon={FiUser} label="Submitted by" value={file.createdBy?.name} />
+            <InfoRow icon={FiUser}  label="Submitted by"   value={file.createdBy?.name} />
             <InfoRow icon={FiClock} label="Date Submitted" value={new Date(file.createdAt).toLocaleString('en-IN', { dateStyle: 'long', timeStyle: 'short' })} />
             <InfoRow icon={FiClock} label="System Last Sync" value={new Date(file.updatedAt).toLocaleString('en-IN', { dateStyle: 'medium', timeStyle: 'short' })} />
-            <InfoRow icon={FiTag} label="Log Division" value={file.department} />
-            <InfoRow icon={FiTag} label="Record Category" value={file.category} />
+            <InfoRow icon={FiTag}   label="Log Division"   value={file.department} />
+            <InfoRow icon={FiTag}   label="Record Category" value={file.category} />
           </div>
 
           {file.tags?.length > 0 && (
@@ -228,19 +236,25 @@ const FileDetailPage = () => {
         </div>
       </div>
 
-      {/* Approval action overlay */}
+      {/* Approval Action Modal */}
       {showApproval && (
         <ApprovalModal
           file={file}
           onClose={() => setShowApproval(false)}
-          onSuccess={fetchFile}
+          onSuccess={() => {
+            refetch(); // RTK Query refetch — no manual state needed
+            setShowApproval(false);
+          }}
         />
       )}
 
-      {/* Premium Accessible Delete confirmation modal */}
+      {/* Delete Confirmation Modal */}
       {showDelete && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-          <div className="absolute inset-0 bg-black/30 dark:bg-black/50 backdrop-blur-sm animate-fade-in" onClick={() => setShowDelete(false)} />
+          <div
+            className="absolute inset-0 bg-black/30 dark:bg-black/50 backdrop-blur-sm animate-fade-in"
+            onClick={() => setShowDelete(false)}
+          />
           <div className="relative bg-white dark:bg-dark-card rounded-2xl shadow-2xl p-6 max-w-sm w-full border border-gray-150 dark:border-dark-border/40 animate-slide-in">
             <div className="flex flex-col items-center text-center gap-3">
               <div className="w-12 h-12 bg-rose-50 dark:bg-rose-950/40 border border-rose-100 dark:border-rose-900/30 rounded-full flex items-center justify-center">
@@ -267,4 +281,3 @@ const FileDetailPage = () => {
 };
 
 export default FileDetailPage;
-

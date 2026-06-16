@@ -1,8 +1,19 @@
+/**
+ * FileFormPage.jsx
+ *
+ * Changes from original:
+ *  ✅ Removed manual service calls (createFile, updateFile, getFileById)
+ *  ✅ Uses useGetFileByIdQuery for pre-filling edit form
+ *  ✅ Uses useCreateFileMutation and useUpdateFileMutation
+ *  ✅ validateFileForm() from utils/validators.js
+ *  ✅ Cache is automatically invalidated after create/update
+ */
 import React, { useEffect, useState, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { FiArrowLeft, FiUpload, FiX, FiFile, FiCheckSquare, FiAlertCircle } from 'react-icons/fi';
 import toast from 'react-hot-toast';
-import { createFile, updateFile, getFileById } from '../services/fileService';
+import { useGetFileByIdQuery, useCreateFileMutation, useUpdateFileMutation } from '../features/files/fileApi';
+import { validateFileForm } from '../utils/validators';
 import LoadingSkeleton from '../components/LoadingSkeleton';
 import InputField from '../components/InputField';
 
@@ -10,12 +21,10 @@ const DEPARTMENTS = [
   'HR', 'Finance', 'IT', 'Operations', 'Legal',
   'Procurement', 'Administration', 'Engineering', 'General',
 ];
-
 const CATEGORIES = [
   'Budget Approval', 'Leave Request', 'Procurement', 'Recruitment',
   'IT Request', 'Policy Review', 'Contract', 'Report', 'Complaint', 'General',
 ];
-
 const PRIORITIES = ['Low', 'Medium', 'High', 'Urgent'];
 
 const FileFormPage = () => {
@@ -33,57 +42,42 @@ const FileFormPage = () => {
     tags: '',
   });
   const [errors, setErrors] = useState({});
-  const [loading, setLoading] = useState(isEdit);
-  const [submitting, setSubmitting] = useState(false);
   const [selectedFiles, setSelectedFiles] = useState([]);
   const [dragOver, setDragOver] = useState(false);
 
+  // ── RTK Query hooks ───────────────────────────────────
+  // Only fetch existing file data when editing
+  const { data: fileResponse, isLoading: isLoadingFile } = useGetFileByIdQuery(id, {
+    skip: !isEdit,
+  });
+  const [createFile, { isLoading: isCreating }] = useCreateFileMutation();
+  const [updateFile, { isLoading: isUpdating }] = useUpdateFileMutation();
+
+  const submitting = isCreating || isUpdating;
+
+  // Pre-fill form when editing — runs when file data arrives
   useEffect(() => {
-    if (isEdit) {
-      const fetchFile = async () => {
-        try {
-          const res = await getFileById(id);
-          const f = res.data;
-          setForm({
-            title: f.title || '',
-            description: f.description || '',
-            department: f.department || '',
-            category: f.category || '',
-            priority: f.priority || 'Medium',
-            tags: f.tags?.join(', ') || '',
-          });
-        } catch {
-          toast.error('Could not load request credentials');
-          navigate('/files');
-        } finally {
-          setLoading(false);
-        }
-      };
-      fetchFile();
+    if (isEdit && fileResponse?.data) {
+      const f = fileResponse.data;
+      setForm({
+        title:       f.title       || '',
+        description: f.description || '',
+        department:  f.department  || '',
+        category:    f.category    || '',
+        priority:    f.priority    || 'Medium',
+        tags:        f.tags?.join(', ') || '',
+      });
     }
-  }, [id, isEdit, navigate]);
+  }, [isEdit, fileResponse]);
 
-  const validate = () => {
-    const e = {};
-    if (!form.title.trim()) e.title = 'Title is required';
-    else if (form.title.trim().length < 5) e.title = 'Title must be at least 5 characters';
-    if (!form.department) e.department = 'Department is required';
-    if (!form.category) e.category = 'Category is required';
-    return e;
-  };
-
+  // ── Form handlers ─────────────────────────────────────
   const handleChange = (e) => {
     setForm((prev) => ({ ...prev, [e.target.name]: e.target.value }));
-    setErrors((prev) => ({ ...prev, [e.target.name]: '' }));
-  };
-
-  const handleFileSelect = (e) => {
-    const newFiles = Array.from(e.target.files || []);
-    addFiles(newFiles);
+    if (errors[e.target.name]) setErrors((prev) => ({ ...prev, [e.target.name]: '' }));
   };
 
   const addFiles = (newFiles) => {
-    const validFiles = newFiles.filter((f) => f.size <= 10 * 1024 * 1024); // 10MB limit
+    const validFiles = newFiles.filter((f) => f.size <= 10 * 1024 * 1024);
     if (validFiles.length < newFiles.length) {
       toast.error('Some files exceed the 10MB safety limit and were omitted');
     }
@@ -93,9 +87,8 @@ const FileFormPage = () => {
     });
   };
 
-  const removeFile = (name) => {
-    setSelectedFiles((prev) => prev.filter((f) => f.name !== name));
-  };
+  const handleFileSelect = (e) => addFiles(Array.from(e.target.files || []));
+  const removeFile = (name) => setSelectedFiles((prev) => prev.filter((f) => f.name !== name));
 
   const handleDrop = (e) => {
     e.preventDefault();
@@ -105,31 +98,33 @@ const FileFormPage = () => {
 
   const handleSubmit = async (e) => {
     e.preventDefault();
-    const errs = validate();
-    if (Object.keys(errs).length) { setErrors(errs); return; }
 
-    setSubmitting(true);
+    // ── Plain JS Validation ───────────────────────────
+    const validationErrors = validateFileForm(form);
+    if (Object.keys(validationErrors).length > 0) {
+      setErrors(validationErrors);
+      return;
+    }
+
     try {
       const formData = new FormData();
       Object.entries(form).forEach(([k, v]) => formData.append(k, v));
-      selectedFiles.forEach((f) => formData.append('attachments', f));
+      selectedFiles.forEach((f) => formData.append('attachment', f));
 
       if (isEdit) {
-        await updateFile(id, formData);
+        await updateFile({ id, formData }).unwrap();
         toast.success('Document request updated successfully!');
       } else {
-        await createFile(formData);
+        await createFile(formData).unwrap();
         toast.success('Document request submitted successfully!');
       }
       navigate('/files');
     } catch (err) {
-      toast.error(err.response?.data?.message || `Failed to ${isEdit ? 'update' : 'submit'} document`);
-    } finally {
-      setSubmitting(false);
+      toast.error(err?.data?.message || `Failed to ${isEdit ? 'update' : 'submit'} document`);
     }
   };
 
-  if (loading) return <LoadingSkeleton variant="detail" />;
+  if (isEdit && isLoadingFile) return <LoadingSkeleton variant="detail" />;
 
   return (
     <div className="max-w-3xl space-y-6 animate-fade-in pb-12">
@@ -152,7 +147,7 @@ const FileFormPage = () => {
       </div>
 
       <form onSubmit={handleSubmit} className="space-y-6">
-        {/* Basic info */}
+        {/* Document Specifications */}
         <div className="card-premium border-gray-150 dark:border-dark-border/40 bg-white dark:bg-dark-card space-y-5">
           <div className="flex items-center gap-2 pb-3 border-b border-gray-100 dark:border-dark-border/20">
             <FiCheckSquare className="text-primary-500 w-4.5 h-4.5" />
@@ -170,7 +165,9 @@ const FileFormPage = () => {
           />
 
           <div className="space-y-1.5">
-            <label className="text-[10px] font-extrabold uppercase tracking-widest text-gray-450 dark:text-gray-500">Summary / Purpose Context</label>
+            <label className="text-[10px] font-extrabold uppercase tracking-widest text-gray-450 dark:text-gray-500">
+              Summary / Purpose Context
+            </label>
             <textarea
               name="description"
               value={form.description}
@@ -182,6 +179,7 @@ const FileFormPage = () => {
           </div>
 
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+            {/* Department */}
             <div className="space-y-1.5">
               <label className="text-[10px] font-extrabold uppercase tracking-widest text-gray-450 dark:text-gray-500">
                 Division <span className="text-rose-500 font-extrabold">*</span>
@@ -193,18 +191,16 @@ const FileFormPage = () => {
                 className={`input-field text-xs font-semibold py-3 cursor-pointer rounded-xl border-gray-200 dark:border-dark-border/30 ${errors.department ? 'border-rose-400 focus:ring-rose-450' : ''}`}
               >
                 <option value="">Select Division</option>
-                {DEPARTMENTS.map((d) => (
-                  <option key={d} value={d}>{d}</option>
-                ))}
+                {DEPARTMENTS.map((d) => <option key={d} value={d}>{d}</option>)}
               </select>
               {errors.department && (
                 <p className="mt-1 text-[10px] font-bold text-rose-500 flex items-center gap-1">
-                  <FiAlertCircle />
-                  {errors.department}
+                  <FiAlertCircle />{errors.department}
                 </p>
               )}
             </div>
 
+            {/* Category */}
             <div className="space-y-1.5">
               <label className="text-[10px] font-extrabold uppercase tracking-widest text-gray-450 dark:text-gray-500">
                 Classification <span className="text-rose-500 font-extrabold">*</span>
@@ -216,18 +212,16 @@ const FileFormPage = () => {
                 className={`input-field text-xs font-semibold py-3 cursor-pointer rounded-xl border-gray-200 dark:border-dark-border/30 ${errors.category ? 'border-rose-400 focus:ring-rose-450' : ''}`}
               >
                 <option value="">Select Classification</option>
-                {CATEGORIES.map((c) => (
-                  <option key={c} value={c}>{c}</option>
-                ))}
+                {CATEGORIES.map((c) => <option key={c} value={c}>{c}</option>)}
               </select>
               {errors.category && (
                 <p className="mt-1 text-[10px] font-bold text-rose-500 flex items-center gap-1">
-                  <FiAlertCircle />
-                  {errors.category}
+                  <FiAlertCircle />{errors.category}
                 </p>
               )}
             </div>
 
+            {/* Priority */}
             <div className="space-y-1.5">
               <label className="text-[10px] font-extrabold uppercase tracking-widest text-gray-450 dark:text-gray-500">Priority Level</label>
               <select
@@ -236,15 +230,16 @@ const FileFormPage = () => {
                 onChange={handleChange}
                 className="input-field text-xs font-semibold py-3 cursor-pointer rounded-xl border-gray-200 dark:border-dark-border/30"
               >
-                {PRIORITIES.map((p) => (
-                  <option key={p} value={p}>{p}</option>
-                ))}
+                {PRIORITIES.map((p) => <option key={p} value={p}>{p}</option>)}
               </select>
             </div>
           </div>
 
+          {/* Tags */}
           <div className="space-y-1.5">
-            <label className="text-[10px] font-extrabold uppercase tracking-widest text-gray-450 dark:text-gray-500">Reference Identifiers (comma-separated)</label>
+            <label className="text-[10px] font-extrabold uppercase tracking-widest text-gray-450 dark:text-gray-500">
+              Reference Identifiers (comma-separated)
+            </label>
             <input
               type="text"
               name="tags"
@@ -266,7 +261,7 @@ const FileFormPage = () => {
             <h3 className="font-bold text-gray-800 dark:text-gray-200 text-sm uppercase tracking-wider">Supporting Documentation</h3>
           </div>
 
-          {/* Premium Drop zone */}
+          {/* Drop zone */}
           <div
             onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
             onDragLeave={() => setDragOver(false)}
@@ -287,15 +282,8 @@ const FileFormPage = () => {
             </p>
           </div>
 
-          <input
-            ref={fileInputRef}
-            type="file"
-            multiple
-            onChange={handleFileSelect}
-            className="hidden"
-          />
+          <input ref={fileInputRef} type="file" multiple onChange={handleFileSelect} className="hidden" />
 
-          {/* File grid listing */}
           {selectedFiles.length > 0 && (
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-2">
               {selectedFiles.map((f) => (
@@ -307,9 +295,7 @@ const FileFormPage = () => {
                     <FiFile className="w-4 h-4 text-primary-500 flex-shrink-0" />
                   </div>
                   <div className="flex-1 min-w-0 pr-1">
-                    <p className="text-xs font-bold text-gray-700 dark:text-gray-200 truncate">
-                      {f.name}
-                    </p>
+                    <p className="text-xs font-bold text-gray-700 dark:text-gray-200 truncate">{f.name}</p>
                     <span className="text-[9px] font-extrabold text-gray-400 dark:text-gray-500">
                       {(f.size / 1024).toFixed(1)} KB
                     </span>
@@ -327,7 +313,7 @@ const FileFormPage = () => {
           )}
         </div>
 
-        {/* Form actions */}
+        {/* Form Actions */}
         <div className="flex gap-3 justify-end">
           <button
             type="button"
@@ -357,4 +343,3 @@ const FileFormPage = () => {
 };
 
 export default FileFormPage;
-

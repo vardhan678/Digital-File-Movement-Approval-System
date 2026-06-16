@@ -31,6 +31,7 @@ const ApprovalTimeline = ({ history = [] }) => {
           const Icon = cfg.icon;
           return (
             <div
+            //Creates one timeline row.
               key={idx}
               className="flex gap-4 relative animate-fade-in"
               style={{ animationDelay: `${idx * 0.1}s` }}

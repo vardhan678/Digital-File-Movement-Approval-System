@@ -21,8 +21,8 @@ const userSchema = new mongoose.Schema(
     password: {
       type: String,
       required: [true, 'Password is required'],
-      minlength: [6, 'Password must be at least 6 characters'],
-      select: false, // Don't return password in queries by default
+      minlength: [8, 'Password must be at least 8 characters'],
+      select: false,
     },
     role: {
       type: String,
@@ -38,23 +38,32 @@ const userSchema = new mongoose.Schema(
       type: Boolean,
       default: true,
     },
+    lastLogin: {
+      type: Date,
+      default: null,
+    },
   },
   {
     timestamps: true,
   }
 );
 
+// Indexes
+userSchema.index({ role: 1 });
+userSchema.index({ isActive: 1 });
+userSchema.index({ lastLogin: -1 });
+
 // Hash password before saving
 userSchema.pre('save', async function (next) {
   if (!this.isModified('password')) return next();
   const salt = await bcrypt.genSalt(12);
-  this.password = await bcrypt.hash(this.password, salt);
+  this.password = await bcrypt.hash(this.password, salt);   
   next();
 });
 
 // Method to compare passwords
 userSchema.methods.matchPassword = async function (enteredPassword) {
-  return await bcrypt.compare(enteredPassword, this.password);
+  return await bcrypt.compare(enteredPassword, this.password);  
 };
 
-module.exports = mongoose.model('User', userSchema);
+module.exports = mongoose.model('User', userSchema);// by  using the 

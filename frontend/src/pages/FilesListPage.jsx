@@ -1,20 +1,28 @@
-import React, { useEffect, useState, useCallback } from 'react';
+/**
+ * FilesListPage.jsx
+ *
+ * Changes from original:
+ *  ✅ Removed manual useState/useEffect fetch pattern
+ *  ✅ Uses useGetFilesQuery (RTK Query) — auto-refetches when params change
+ *  ✅ Uses useDeleteFileMutation (RTK Query) — auto-invalidates cache
+ *  ✅ RTK Query skips re-fetch when args are the same (automatic deduplication)
+ */
+import React, { useState, useMemo } from 'react';
 import { Link } from 'react-router-dom';
-import { 
-  FiPlus, FiGrid, FiList, FiAlertTriangle, FiSearch, 
-  FiSliders, FiUsers, FiDollarSign, FiCpu, FiTrendingUp, 
-  FiShield, FiShoppingBag, FiLayers, FiCode, FiHash 
+import {
+  FiPlus, FiGrid, FiList, FiAlertTriangle, FiSearch,
+  FiSliders, FiUsers, FiDollarSign, FiCpu, FiTrendingUp,
+  FiShield, FiShoppingBag, FiLayers, FiCode, FiHash,
 } from 'react-icons/fi';
 import toast from 'react-hot-toast';
-import { getFiles, deleteFile } from '../services/fileService';
-import { useAuth } from '../context/AuthContext';
+import { useSelector } from 'react-redux';
+import { useGetFilesQuery, useDeleteFileMutation } from '../features/files/fileApi';
 import FileCard from '../components/FileCard';
 import FileTable from '../components/FileTable';
 import LoadingSkeleton from '../components/LoadingSkeleton';
 import EmptyState from '../components/EmptyState';
 import Pagination from '../components/Pagination';
 import useDebounce from '../hooks/useDebounce';
-
 
 const STATUS_OPTIONS = ['Submitted', 'Under Review', 'Approved', 'Rejected', 'Returned'];
 const PRIORITY_OPTIONS = ['Low', 'Medium', 'High', 'Urgent'];
@@ -32,67 +40,48 @@ const CATEGORIES = [
 ];
 
 const FilesListPage = () => {
-  const { user } = useAuth();
-  const [files, setFiles] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [viewMode, setViewMode] = useState('grid');
-  const [search, setSearch] = useState('');
-  const [statusFilter, setStatusFilter] = useState('');
+  const user = useSelector((state) => state.auth.user);
+
+  // ── Filter/pagination state ───────────────────────────
+  const [viewMode, setViewMode]           = useState('grid');
+  const [search, setSearch]               = useState('');
+  const [statusFilter, setStatusFilter]   = useState('');
   const [priorityFilter, setPriorityFilter] = useState('');
-  const [deptFilter, setDeptFilter] = useState('');
-  const [currentPage, setCurrentPage] = useState(1);
-  const [totalPages, setTotalPages] = useState(1);
-  const [totalCount, setTotalCount] = useState(0);
-  const [deleteModal, setDeleteModal] = useState(null);
-  const [deleting, setDeleting] = useState(false);
+  const [deptFilter, setDeptFilter]       = useState('');
+  const [currentPage, setCurrentPage]     = useState(1);
+  const [deleteModal, setDeleteModal]     = useState(null);
   const [showAdvancedFilters, setShowAdvancedFilters] = useState(false);
 
   const debouncedSearch = useDebounce(search, 300);
 
-  const fetchFiles = useCallback(async () => {
-    setLoading(true);
-    try {
-      const params = {
-        page: currentPage,
-        limit: 12,
-        ...(debouncedSearch && { search: debouncedSearch }),
-        ...(statusFilter && { status: statusFilter }),
-        ...(priorityFilter && { priority: priorityFilter }),
-        ...(deptFilter && { department: deptFilter }),
-      };
-      const res = await getFiles(params);
-      setFiles(res.data?.files || res.data || []);
-      setTotalPages(res.data?.totalPages || 1);
-      setTotalCount(res.data?.total || 0);
-    } catch {
-      toast.error('Failed to load documents');
-    } finally {
-      setLoading(false);
-    }
-  }, [currentPage, debouncedSearch, statusFilter, priorityFilter, deptFilter]);
+  // Build query params object — RTK Query re-fetches automatically when this changes
+  const queryParams = useMemo(() => ({
+    page: currentPage,
+    limit: 12,
+    ...(debouncedSearch  && { search: debouncedSearch }),
+    ...(statusFilter     && { status: statusFilter }),
+    ...(priorityFilter   && { priority: priorityFilter }),
+    ...(deptFilter       && { department: deptFilter }),
+  }), [currentPage, debouncedSearch, statusFilter, priorityFilter, deptFilter]);
 
-  useEffect(() => {
-    fetchFiles();
-  }, [fetchFiles]);
+  // ── RTK Query hooks ───────────────────────────────────
+  const {
+    data: filesResponse,
+    isLoading,
+    isFetching,
+  } = useGetFilesQuery(queryParams);
 
-  // Reset page on filter change
-  useEffect(() => {
+  const [deleteFile, { isLoading: deleting }] = useDeleteFileMutation();
+
+  const files      = filesResponse?.data || [];
+  const pagination = filesResponse?.pagination || {};
+  const totalPages = pagination.pages || 1;
+  const totalCount = pagination.total || 0;
+
+  // Reset to page 1 when any filter changes
+  const handleFilterChange = (setter) => (value) => {
+    setter(value);
     setCurrentPage(1);
-  }, [debouncedSearch, statusFilter, priorityFilter, deptFilter]);
-
-  const handleDelete = async () => {
-    if (!deleteModal) return;
-    setDeleting(true);
-    try {
-      await deleteFile(deleteModal);
-      toast.success('Document deleted successfully');
-      setDeleteModal(null);
-      fetchFiles();
-    } catch (err) {
-      toast.error(err.response?.data?.message || 'Delete failed');
-    } finally {
-      setDeleting(false);
-    }
   };
 
   const clearFilters = () => {
@@ -104,10 +93,18 @@ const FilesListPage = () => {
   };
 
   const selectCategory = (catName) => {
-    if (deptFilter === catName) {
-      setDeptFilter(''); // Toggle off
-    } else {
-      setDeptFilter(catName);
+    setDeptFilter((prev) => (prev === catName ? '' : catName));
+    setCurrentPage(1);
+  };
+
+  const handleDelete = async () => {
+    if (!deleteModal) return;
+    try {
+      await deleteFile(deleteModal).unwrap();
+      toast.success('Document deleted successfully');
+      setDeleteModal(null);
+    } catch (err) {
+      toast.error(err?.data?.message || 'Delete failed');
     }
   };
 
@@ -115,7 +112,7 @@ const FilesListPage = () => {
 
   return (
     <div className="space-y-6 animate-fade-in pb-12">
-      {/* Header section with CTAs */}
+      {/* Header section */}
       <div className="flex items-center justify-between flex-wrap gap-4">
         <div>
           <h2 className="text-2xl font-extrabold tracking-tight text-gray-900 dark:text-white">
@@ -125,9 +122,8 @@ const FilesListPage = () => {
             {totalCount} active {totalCount === 1 ? 'record' : 'records'} logged
           </p>
         </div>
-        
+
         <div className="flex items-center gap-2">
-          {/* Quick Clear Filter shortcut */}
           {hasFilters && (
             <button
               onClick={clearFilters}
@@ -136,7 +132,6 @@ const FilesListPage = () => {
               Reset Filters
             </button>
           )}
-
           {user?.role === 'employee' && (
             <Link to="/files/new" className="btn-primary flex items-center gap-2">
               <FiPlus className="w-4 h-4 stroke-[3]" />
@@ -146,7 +141,7 @@ const FilesListPage = () => {
         </div>
       </div>
 
-      {/* Airbnb-style Horizontal Category Bar with Icons */}
+      {/* Department category bar */}
       <div className="w-full space-y-2">
         <span className="text-[10px] font-bold text-gray-400 dark:text-gray-500 uppercase tracking-widest block pl-1">
           Explore by Department
@@ -164,7 +159,7 @@ const FilesListPage = () => {
                     : 'bg-white dark:bg-dark-card border-gray-150 dark:border-dark-border/40 text-gray-500 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white hover:border-gray-300 dark:hover:border-dark-border'
                 }`}
               >
-                <Icon className="w-4.5 h-4.5" />
+                <Icon className="w-4 h-4" />
                 <span className="text-[10px] font-bold tracking-wide">{name}</span>
               </button>
             );
@@ -172,10 +167,10 @@ const FilesListPage = () => {
         </div>
       </div>
 
-      {/* Modern Filter Sheet */}
+      {/* Filter Sheet */}
       <div className="card-premium p-4 border-gray-150 dark:border-dark-border/40">
         <div className="flex flex-col md:flex-row gap-4 items-center justify-between">
-          {/* Universal debounced search input */}
+          {/* Search */}
           <div className="relative w-full md:max-w-md">
             <span className="absolute inset-y-0 left-3.5 flex items-center pointer-events-none text-gray-400 dark:text-gray-500">
               <FiSearch className="w-4 h-4" />
@@ -183,13 +178,12 @@ const FilesListPage = () => {
             <input
               type="text"
               value={search}
-              onChange={(e) => setSearch(e.target.value)}
+              onChange={(e) => { setSearch(e.target.value); setCurrentPage(1); }}
               placeholder="Search documents by title, description, keywords..."
               className="input-field pl-10 text-sm py-2.5 rounded-xl border-gray-200 dark:border-dark-border/30"
             />
           </div>
 
-          {/* Quick toggle controls */}
           <div className="flex items-center justify-between w-full md:w-auto gap-4">
             <button
               onClick={() => setShowAdvancedFilters(!showAdvancedFilters)}
@@ -199,39 +193,38 @@ const FilesListPage = () => {
                   : 'bg-white dark:bg-dark-card text-gray-500 dark:text-gray-400 border-gray-150 dark:border-dark-border/40 hover:bg-gray-50'
               }`}
             >
-              <FiSliders className="w-4.5 h-4.5" />
-              Filters
+              <FiSliders className="w-4 h-4" />
+              Filters {isFetching && <span className="w-2 h-2 bg-primary-500 rounded-full animate-pulse" />}
             </button>
 
-            {/* Grid vs List View controls */}
+            {/* Grid vs List View */}
             <div className="flex items-center gap-1.5 bg-gray-100/70 dark:bg-dark-200/50 rounded-xl p-1 border border-transparent dark:border-dark-border/20">
               <button
                 onClick={() => setViewMode('table')}
                 className={`p-2 rounded-lg transition-colors ${viewMode === 'table' ? 'bg-white dark:bg-dark-card shadow text-primary-600 dark:text-primary-400 font-bold' : 'text-gray-400 hover:text-gray-600'}`}
                 title="Table List View"
               >
-                <FiList className="w-4.5 h-4.5" />
+                <FiList className="w-4 h-4" />
               </button>
               <button
                 onClick={() => setViewMode('grid')}
                 className={`p-2 rounded-lg transition-colors ${viewMode === 'grid' ? 'bg-white dark:bg-dark-card shadow text-primary-600 dark:text-primary-400 font-bold' : 'text-gray-400 hover:text-gray-600'}`}
                 title="Card Grid View"
               >
-                <FiGrid className="w-4.5 h-4.5" />
+                <FiGrid className="w-4 h-4" />
               </button>
             </div>
           </div>
         </div>
 
-        {/* Collapsible advanced filters with smooth animations */}
+        {/* Advanced Filters */}
         {showAdvancedFilters && (
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mt-4 pt-4 border-t border-gray-100 dark:border-dark-border/30 animate-fade-in">
-            {/* Status Dropdown */}
             <div className="space-y-1.5">
               <label className="text-[10px] font-extrabold uppercase tracking-widest text-gray-400 dark:text-gray-500">Document Status</label>
               <select
                 value={statusFilter}
-                onChange={(e) => setStatusFilter(e.target.value)}
+                onChange={(e) => handleFilterChange(setStatusFilter)(e.target.value)}
                 className="w-full px-4 py-2.5 bg-gray-50 dark:bg-dark-200 border border-gray-200 dark:border-dark-border/40 rounded-xl text-xs font-semibold text-gray-700 dark:text-gray-300 outline-none"
               >
                 <option value="">All Statuses</option>
@@ -240,13 +233,11 @@ const FilesListPage = () => {
                 ))}
               </select>
             </div>
-
-            {/* Priority Dropdown */}
             <div className="space-y-1.5">
               <label className="text-[10px] font-extrabold uppercase tracking-widest text-gray-400 dark:text-gray-500">Urgency Level</label>
               <select
                 value={priorityFilter}
-                onChange={(e) => setPriorityFilter(e.target.value)}
+                onChange={(e) => handleFilterChange(setPriorityFilter)(e.target.value)}
                 className="w-full px-4 py-2.5 bg-gray-50 dark:bg-dark-200 border border-gray-200 dark:border-dark-border/40 rounded-xl text-xs font-semibold text-gray-700 dark:text-gray-300 outline-none"
               >
                 <option value="">All Priorities</option>
@@ -259,13 +250,13 @@ const FilesListPage = () => {
         )}
       </div>
 
-      {/* Visual Content Segment */}
-      {loading ? (
+      {/* Content */}
+      {isLoading ? (
         <LoadingSkeleton variant={viewMode === 'table' ? 'table' : 'cards'} />
       ) : files.length === 0 ? (
         <EmptyState
           title="Document Hub is Empty"
-          description={hasFilters ? 'No files match your advanced filter combinations. Try adjusting parameters.' : "No record logs found. Upload your first file request to start operating."}
+          description={hasFilters ? 'No files match your advanced filter combinations. Try adjusting parameters.' : 'No record logs found. Upload your first file request to start operating.'}
           action={
             user?.role === 'employee' && !hasFilters ? (
               <Link to="/files/new" className="btn-primary flex items-center gap-2">
@@ -280,33 +271,26 @@ const FilesListPage = () => {
           <FileTable
             files={files}
             onDelete={user?.role === 'employee' ? (id) => setDeleteModal(id) : null}
-            showActions={true}
+            showActions
           />
-          <Pagination
-            currentPage={currentPage}
-            totalPages={totalPages}
-            onPageChange={setCurrentPage}
-          />
+          <Pagination currentPage={currentPage} totalPages={totalPages} onPageChange={setCurrentPage} />
         </div>
       ) : (
         <div className="space-y-6">
           <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6">
-            {files.map((file) => (
-              <FileCard key={file._id} file={file} />
-            ))}
+            {files.map((file) => <FileCard key={file._id} file={file} />)}
           </div>
-          <Pagination
-            currentPage={currentPage}
-            totalPages={totalPages}
-            onPageChange={setCurrentPage}
-          />
+          <Pagination currentPage={currentPage} totalPages={totalPages} onPageChange={setCurrentPage} />
         </div>
       )}
 
-      {/* Premium Accessible Delete confirmation modal */}
+      {/* Delete Confirmation Modal */}
       {deleteModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-          <div className="absolute inset-0 bg-black/30 dark:bg-black/50 backdrop-blur-sm animate-fade-in" onClick={() => setDeleteModal(null)} />
+          <div
+            className="absolute inset-0 bg-black/30 dark:bg-black/50 backdrop-blur-sm animate-fade-in"
+            onClick={() => setDeleteModal(null)}
+          />
           <div className="relative bg-white dark:bg-dark-card rounded-2xl shadow-2xl p-6 max-w-sm w-full border border-gray-100 dark:border-dark-border/40 animate-slide-in">
             <div className="flex flex-col items-center text-center gap-3">
               <div className="w-12 h-12 bg-rose-50 dark:bg-rose-950/40 border border-rose-100 dark:border-rose-900/30 rounded-full flex items-center justify-center">
@@ -340,4 +324,3 @@ const FilesListPage = () => {
 };
 
 export default FilesListPage;
-
