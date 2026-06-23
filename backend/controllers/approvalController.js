@@ -59,11 +59,19 @@ const updateStatus = asyncHandler(async (req, res) => {
 
   const previousStatus = file.status;
 
+  // Maps action key → exact enum value in approvalHistorySchema
+  const actionEnumMap = {
+    review:  'under_review',
+    approve: 'approved',
+    reject:  'rejected',
+    return:  'returned',
+  };
+
   // Update file inline history
   file.status = newStatus;
   file.remarks = remarks || '';
   file.approvalHistory.push({
-    action: action === 'review' ? 'under_review' : action === 'return' ? 'returned' : action + 'd',
+    action: actionEnumMap[action],
     actionBy: req.user._id,
     actionByName: req.user.name,
     remarks: remarks || '',

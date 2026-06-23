@@ -7,7 +7,7 @@ const validate = (schema) => (req, res, next) => {
     abortEarly: false,   // return all errors at once
     stripUnknown: true,  // remove unknown fields
   });
-
+  
   if (error) {
     const messages = error.details.map((d) => d.message).join(', ');
     return res.status(400).json({

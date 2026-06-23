@@ -6,14 +6,30 @@
  *  ✅ Uses usePerformActionMutation from RTK Query
  *  ✅ Cache automatically invalidated on success (no manual refetch needed)
  *  ✅ isLoading state comes from RTK Query mutation state
+ *  ✅ Action buttons are filtered based on the file's current status
+ *     so invalid transitions (e.g. Reject on an Approved file) are hidden
  */
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import { FiX, FiCheckCircle, FiXCircle, FiRotateCcw, FiClock } from 'react-icons/fi';
 import toast from 'react-hot-toast';
 import { usePerformActionMutation } from '../features/approval/approvalApi';
 
+// Mirrors the backend validTransitions — maps current status → allowed action keys
+const allowedActionsForStatus = {
+  Submitted:     ['review', 'reject'],
+  'Under Review': ['approve', 'reject', 'return'],
+  Returned:      ['review'],
+  Approved:      [],
+  Rejected:      [],
+};
+
 const ApprovalModal = ({ file, onClose, onSuccess }) => {
-  const [action, setAction]   = useState('approve');
+  const availableActions = useMemo(() => {
+    const currentStatus = file?.status || '';
+    return allowedActionsForStatus[currentStatus] ?? [];
+  }, [file]);
+
+  const [action, setAction]   = useState(() => availableActions[0] || '');
   const [remarks, setRemarks] = useState('');
 
   // ── RTK Query mutation ────────────────────────────────
@@ -64,7 +80,7 @@ const ApprovalModal = ({ file, onClose, onSuccess }) => {
 
         <div className="p-6 space-y-4">
           {/* File info */}
-          <div className={`p-3 rounded-lg ${cfg.bg}`}>
+          <div className={`p-3 rounded-lg ${cfg ? cfg.bg : 'bg-gray-50 dark:bg-gray-800/30'}`}>
             <p className="text-sm font-semibold text-gray-700 dark:text-gray-300">{file.title}</p>
             <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
               {file.department} · {file.category}
@@ -72,56 +88,70 @@ const ApprovalModal = ({ file, onClose, onSuccess }) => {
           </div>
 
           {/* Action selector */}
-          <div>
-            <label className="label">Select Action</label>
-            <div className="grid grid-cols-2 gap-2">
-              {Object.entries(actionConfig).map(([key, val]) => (
-                <button
-                  key={key}
-                  onClick={() => setAction(key)}
-                  className={`p-3 rounded-lg border-2 text-sm font-medium transition-all text-left ${
-                    action === key
-                      ? 'border-primary-500 bg-primary-50 dark:bg-primary-900/20 text-primary-700 dark:text-primary-400'
-                      : 'border-gray-200 dark:border-dark-border hover:border-gray-300 text-gray-600 dark:text-gray-400'
-                  }`}
-                >
-                  <val.icon className="w-4 h-4 mb-1" />
-                  {val.label}
-                </button>
-              ))}
+          {availableActions.length === 0 ? (
+            <div className="flex items-center gap-2 p-3 rounded-lg bg-gray-100 dark:bg-gray-800/50 text-sm text-gray-500 dark:text-gray-400">
+              <FiXCircle className="w-4 h-4 flex-shrink-0 text-gray-400" />
+              This file is <strong className="text-gray-700 dark:text-gray-300">{file.status}</strong> — no further actions are available.
             </div>
-          </div>
+          ) : (
+            <div>
+              <label className="label">Select Action</label>
+              <div className="grid grid-cols-2 gap-2">
+                {availableActions.map((key) => {
+                  const val = actionConfig[key];
+                  return (
+                    <button
+                      key={key}
+                      onClick={() => setAction(key)}
+                      className={`p-3 rounded-lg border-2 text-sm font-medium transition-all text-left ${
+                        action === key
+                          ? 'border-primary-500 bg-primary-50 dark:bg-primary-900/20 text-primary-700 dark:text-primary-400'
+                          : 'border-gray-200 dark:border-dark-border hover:border-gray-300 text-gray-600 dark:text-gray-400'
+                      }`}
+                    >
+                      <val.icon className="w-4 h-4 mb-1" />
+                      {val.label}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          )}
 
-          {/* Remarks */}
-          <div>
-            <label className="label">
-              Remarks{' '}
-              {(action === 'reject' || action === 'return') && (
-                <span className="text-red-500">*</span>
-              )}
-            </label>
-            <textarea
-              value={remarks}
-              onChange={(e) => setRemarks(e.target.value)}
-              placeholder="Add your remarks or comments..."
-              rows={3}
-              className="input-field resize-none"
-            />
-          </div>
+          {/* Remarks — only shown when an action is available */}
+          {availableActions.length > 0 && (
+            <div>
+              <label className="label">
+                Remarks{' '}
+                {(action === 'reject' || action === 'return') && (
+                  <span className="text-red-500">*</span>
+                )}
+              </label>
+              <textarea
+                value={remarks}
+                onChange={(e) => setRemarks(e.target.value)}
+                placeholder="Add your remarks or comments..."
+                rows={3}
+                className="input-field resize-none"
+              />
+            </div>
+          )}
         </div>
 
         {/* Footer */}
         <div className="flex gap-3 p-6 pt-0">
           <button onClick={onClose} className="btn-secondary flex-1">
-            Cancel
+            {availableActions.length === 0 ? 'Close' : 'Cancel'}
           </button>
-          <button
-            onClick={handleSubmit}
-            disabled={isLoading}
-            className={`${cfg.btnClass} flex-1`}
-          >
-            {isLoading ? 'Processing...' : cfg.label}
-          </button>
+          {availableActions.length > 0 && cfg && (
+            <button
+              onClick={handleSubmit}
+              disabled={isLoading}
+              className={`${cfg.btnClass} flex-1`}
+            >
+              {isLoading ? 'Processing...' : cfg.label}
+            </button>
+          )}
         </div>
       </div>
     </div>

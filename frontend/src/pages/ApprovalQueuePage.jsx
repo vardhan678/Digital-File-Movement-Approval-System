@@ -54,7 +54,7 @@ const ApprovalQueuePage = () => {
     isError,
   } = useGetPendingFilesQuery(queryParams);
 
-  const allFiles     = pendingResponse?.data        || [];
+  const allFiles     = pendingResponse?.data      || [];
   const pagination   = pendingResponse?.pagination  || {};
   const totalPages   = pagination.pages || 1;
   const totalPending = pagination.total || 0;
